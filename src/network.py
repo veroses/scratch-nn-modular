@@ -7,7 +7,7 @@ class Network:
     def __init__(self, layer_sizes, l2_lambda=0.0, momentum_coe = 0.0):
         self.num_layers = len(layer_sizes)
         self.biases = [np.random.rand(y, 1) for y in layer_sizes[1:]]
-        self.weights = [np.random.randn(y, x) * np.sqrt(1 / x) for x, y in zip(layer_sizes[:-1], layer_sizes[1:])]
+        self.weights = [np.random.randn(y, x) * np.sqrt(2 / x) for x, y in zip(layer_sizes[:-1], layer_sizes[1:])]
         self.l2_lambda = l2_lambda
         self.momentum_coe = momentum_coe
         
@@ -40,7 +40,7 @@ class Network:
             ]
 
             for mini_batch in mini_batches:
-                velocity_w, velocity_b = self.update(mini_batch, mini_batch_size, learning_rate, velocity_w, velocity_b)
+                self.update(mini_batch, mini_batch_size, learning_rate, velocity_w, velocity_b)
 
             if test_data:
                 print (f"Epoch {epoch}: {self.evaluate(test_data)} / {n_testdata}")
@@ -49,14 +49,14 @@ class Network:
                 print (f"Epoch {epoch} complete")
 
 
-    def update(self, mini_batch, mini_batch_size, learning_rate, velocity_w, velocity_b):
+    def update(self, mini_batch, batch_size, learning_rate, velocity_w, velocity_b):
 
         X = np.hstack([x for x, y in mini_batch])
         Y = np.hstack([y for x, y in mini_batch])
 
         grad_w, grad_b = self.backprop(X, Y)
-
-        grad_w = grad_w + self.l2_lambda * self.weights / mini_batch_size
+ 
+        grad_w = [g_w + self.l2_lambda * w / batch_size for g_w, w in zip(grad_w, self.weights)]
 
         for l in range(len(self.weights)):
             velocity_w[l] = self.momentum_coe * velocity_w[l] - learning_rate * grad_w[l]
@@ -64,7 +64,7 @@ class Network:
 
             self.weights[l] = self.weights[l] + velocity_w[l]
             self.biases[l] = self.biases[l] + velocity_b[l]
-        return velocity_w, velocity_b
+         
 
     
     def backprop(self, X, Y): #backpropagation algorithm
@@ -75,20 +75,23 @@ class Network:
         z_values = []
 
         #run forward feed
-        for weight, bias in zip(self.weights, self.biases):
+        for weight, bias in zip(self.weights[:-1], self.biases[:-1]):
             z = np.matmul(weight, activation) + bias
             activation = relu(z)
-
             z_values.append(z)
             activations.append(activation)
+        
+        z_L = self.weights[-1] @ activation + self.biases[-1]
+        z_values.append(z_L)
+        activations.append(self.softmax(z_L))
         
         #start backwards run
         batch_size = X.shape[1]
         delta = [np.zeros((b.shape[0], batch_size)) for b in self.biases]
 
-        for layer in range(self.num_layers - 2, -1, -1):
+        for layer in reversed(range(len(self.weights))):
             if layer == self.num_layers - 2:
-                delta[-1] = cross_entropy_delta(activations[-1], Y)
+                delta[layer] = cross_entropy_delta(activations[-1], Y)
             else:
                 delta[layer] = np.multiply(np.matmul(self.weights[layer + 1].T, delta[layer + 1]), relu_prime(z_values[layer]))
             grad_w[layer] = np.matmul(delta[layer], np.transpose(activations[layer])) / batch_size
@@ -96,12 +99,13 @@ class Network:
         return grad_w, grad_b
     
     def evaluate(self, test_data): #evaluate accuracy based on validation set
-        test_results = [(np.argmax(self.feedforward(x)), y) for (x, y) in test_data]
+        test_results = [(np.argmax(self.feedforward(x)), np.argmax(y)) for (x, y) in test_data]
         return sum(int(predicted == actual) for (predicted, actual) in test_results)
     
     def l2_penalty(self, n):
         return 0.5 * self.l2_lambda / n * sum(np.sum(w**2) for w in self.weights)
     
+
 
 def relu(z):
     return np.maximum(0, z)
