@@ -2,60 +2,132 @@ import random
 import numpy as np
 
 
-
-class convolution2d:
-    def __init__(self, ker_size, padding=(0,0), stride=1):
-        self.kernel = np.random.randn(ker_size[0], ker_size[1])
+class Convolution:
+    def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=1):
+        self.kernel = np.random.randn(num_filters, in_channels, ker_size[0], ker_size[1])
         self.bias = np.random.rand()
         self.padding = padding
         self.stride = stride
 
-    def forward(self, x):
-        return cross_correlate(x, self.kernel, self.padding, self.stride) + self.bias
-
-def multi_out_cross_correlate(X, K):
-    return np.stack([multi_in_cross_correlate(X, k) for k in K])
-
-def multi_in_cross_correlate(X, K):
-    return np.sum(cross_correlate(x, k) for x, k in zip(X, K))
-
-
-def cross_correlate(X, K, padding=(0,0), stride=1):
-
-    X = np.pad(X, padding)
-
-    ker_height, ker_width = K.shape
-    x_height, x_width = X.shape
-
-    H = np.zeros(((x_height - ker_height + padding[0] + stride) // stride,( x_width - ker_width + padding[1] + stride) // stride))
-
-    for i in range(H.shape[0]):
-        for j in range(H.shape[1]):
-            H[i][j] = np.sum( X[i * stride: i * stride + ker_height, j * stride: j * stride + ker_width] * K)
+    def forward(self, X):
+        return self.multi_out_cross_correlate(X, self.kernel, self.padding, self.stride) + self.bias
     
-    return H
+    def backward(self, delta):
+        return
+    
+    def multi_out_cross_correlate(self, X, K, padding, stride):
+        return np.stack([np.stack([self.multi_in_cross_correlate(x, k, padding, stride) for k in K]) for x in X])
 
-def pool(X, pool_size=(1, 1), type="max", stride=None, padding=(0,0)):
-    X = np.pad(X, padding)
+    def multi_in_cross_correlate(self, X, K, padding, stride):
+        return np.sum(self.cross_correlate(x, k, padding, stride) for x, k in zip(X, K))
 
-    if stride is None:
-        stride = pool_size
+    def cross_correlate(self, X, K, padding=(0,0), stride=1):
 
-    x_height, x_width = X.shape
-    pool_height, pool_width = pool_size
-    stride_v, stride_h = stride
+        X = np.pad(X, padding)
 
-    H = np.zeros(((x_height - pool_height + stride_h) // stride,( x_width - pool_width + stride_v) // stride))
+        ker_height, ker_width = K.shape
+        x_height, x_width = X.shape
 
-    for i in range(H.shape[0]):
-        for j in range(H.shape[1]):
-            if type == "max":
-                H[i][j] = np.max(X[i * stride: i * stride + pool_height, j * stride: j* stride + pool_width])
-            else:
-                H[i][j] = np.mean(X[i * stride: i * stride + pool_height, j * stride: j* stride + pool_width])
+        H = np.zeros(((x_height - ker_height + padding[0] + stride) // stride,( x_width - ker_width + padding[1] + stride) // stride))
 
-    return H
+        for i in range(H.shape[0]):
+            for j in range(H.shape[1]):
+                H[i][j] = np.sum( X[i * stride: i * stride + ker_height, j * stride: j * stride + ker_width] * K)
+        
+        return H
 
+
+class Pooling:
+    def __init__(self, pool_size, type="max", padding=(0,0), stride=None):
+        self.pool_size = pool_size
+        self.pool_height, self.pool_width = pool_size
+        self.type = type
+        self.padding = padding
+        if stride is None:
+            self.stride = pool_size
+        else:
+            self.stride = stride
+
+    def forward(self, X):
+        self.X = X
+        self.route = []
+        return np.stack([self.multi_in_pool(X[i], i) for i in range(len(X))])
+        
+    def multi_in_pool(self, X, sample):
+            return np.stack([self.pool(X[j], j, sample) for j in range(len(X))])
+
+    def pool(self, X, channel, sample):
+        X = np.pad(X, self.padding)
+
+        x_height, x_width = X.shape
+        stride_v, stride_h = self.stride
+
+        H = np.zeros(((x_height - self.pool_height + stride_h) // self.stride,( x_width - self.pool_width + stride_v) // self.stride))
+
+        for i in range(H.shape[0]):
+            for j in range(H.shape[1]):
+                if self.type == "max":
+                    max = np.max(X[i * self.stride: i * self.stride + self.pool_height, j * self.stride: j* self.stride + self.pool_width])
+                    H[i][j] = max
+                    rows, cols = np.where(X[i * self.stride: i * self.stride + self.pool_height, j * self.stride: j* self.stride + self.pool_width] == max)
+                    global_row = stride_v * i + rows[0] - self.padding[0]
+                    global_col = stride_h * j + row + cols[1] - self.padding[1]
+                    self.route.append((sample, channel, global_row, global_col))
+                else:
+                    H[i][j] = np.mean(X[i * self.stride: i * self.stride + self.pool_height, j * self.stride: j* self.stride + self.pool_width])
+
+        return H
+    
+    def backward(self, delta_out):
+        delta_in = np.zeros_like(self.X)
+        if self.type == "max":
+            indices = np.array(self.route).T
+            delta_vals = delta_out.reshape(-1) #flatten
+            np.add.at(delta_in, (indices[0], indices[1], indices[2], indices[3]), delta_vals)
+        else:
+            delta_in = np.stack([self.mean_back_pool(y) for y in delta_out])
+        return delta_in
+        
+    def mean_back_pool(self, Y):
+        return np.stack([self.mean_back_pool2D(y) for y in Y])
+
+    def mean_back_pool2D(self, y):
+        delta = np.repeat(np.repeat(y, self.pool_height, axis=0), self.pool_width, axis=1) / (self.pool_height * self.pool_width)
+        return delta
+
+    
+    
+
+class Linear:
+    def __init__(self, in_dim, out_dim):
+        self.biases = np.random.rand(out_dim, 1)
+        self.weights = np.random.randn(out_dim, in_dim)
+
+    def forward(self, x):
+        self.x = x
+        return x @ self.weights + self.biases
+
+    def backward(self, grad_out):
+        self.grad_w = grad_out.T @ self.x
+        self.grad_b = np.sum(grad_out, axis=0) / len(grad_out[0])
+        return grad_out @ self.weights
+
+
+    
+
+class SoftMaxCrossEntropy:
+    def __init__(self, logits, labels):
+        #logits (batch_size, outputs)
+        self.logits = logits
+        self.labels = labels
+
+    def forward(self, logits, labels): #for use in training only
+        self.probs = softmax(logits)
+        return cross_entropy(self.probs, labels)
+    
+    def backward(self):
+        return self.probs - self.labels
+'''
 class Network:
     def __init__(self, layer_sizes, l2_lambda=0.0, momentum_coe = 0.0):
         self.num_layers = len(layer_sizes)
@@ -160,6 +232,12 @@ class Network:
     
 
 
+'''
+def softmax(self, z_L):
+        z_stable = z_L - np.max(z_L) #avoid overflow with large z
+        exp_z = np.exp(z_stable)
+        return exp_z / np.sum(exp_z)
+
 def relu(z):
     return np.maximum(0, z)
 
@@ -171,4 +249,3 @@ def cross_entropy(output_a, y):
 
 def cross_entropy_delta(a, y):
     return a - y
-
