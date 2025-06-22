@@ -3,6 +3,59 @@ import numpy as np
 
 
 
+class convolution2d:
+    def __init__(self, ker_size, padding=(0,0), stride=1):
+        self.kernel = np.random.randn(ker_size[0], ker_size[1])
+        self.bias = np.random.rand()
+        self.padding = padding
+        self.stride = stride
+
+    def forward(self, x):
+        return cross_correlate(x, self.kernel, self.padding, self.stride) + self.bias
+
+def multi_out_cross_correlate(X, K):
+    return np.stack([multi_in_cross_correlate(X, k) for k in K])
+
+def multi_in_cross_correlate(X, K):
+    return np.sum(cross_correlate(x, k) for x, k in zip(X, K))
+
+
+def cross_correlate(X, K, padding=(0,0), stride=1):
+
+    X = np.pad(X, padding)
+
+    ker_height, ker_width = K.shape
+    x_height, x_width = X.shape
+
+    H = np.zeros(((x_height - ker_height + padding[0] + stride) // stride,( x_width - ker_width + padding[1] + stride) // stride))
+
+    for i in range(H.shape[0]):
+        for j in range(H.shape[1]):
+            H[i][j] = np.sum( X[i * stride: i * stride + ker_height, j * stride: j * stride + ker_width] * K)
+    
+    return H
+
+def pool(X, pool_size=(1, 1), type="max", stride=None, padding=(0,0)):
+    X = np.pad(X, padding)
+
+    if stride is None:
+        stride = pool_size
+
+    x_height, x_width = X.shape
+    pool_height, pool_width = pool_size
+    stride_v, stride_h = stride
+
+    H = np.zeros(((x_height - pool_height + stride_h) // stride,( x_width - pool_width + stride_v) // stride))
+
+    for i in range(H.shape[0]):
+        for j in range(H.shape[1]):
+            if type == "max":
+                H[i][j] = np.max(X[i * stride: i * stride + pool_height, j * stride: j* stride + pool_width])
+            else:
+                H[i][j] = np.mean(X[i * stride: i * stride + pool_height, j * stride: j* stride + pool_width])
+
+    return H
+
 class Network:
     def __init__(self, layer_sizes, l2_lambda=0.0, momentum_coe = 0.0):
         self.num_layers = len(layer_sizes)
