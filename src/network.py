@@ -2,8 +2,66 @@ import random
 import numpy as np
 
 class LeNet5:
-    def __init__(self):
-        self.layers = [Convolution(1, 6, (5, 5), (2, 2)), Relu(), Pooling((2, 2)), Convolution(6, 16, (5, 5)), ]
+    def __init__(self, l2=0):
+        self.layers = [Convolution(1, 6, (5, 5), (2, 2)), Relu(), Pooling((2, 2)), Convolution(6, 16, (5, 5)), Pooling((2, 2)), Flatten(), Linear(576, 120), Relu(), Linear(120, 84), Relu(), Linear(84, 369), SoftMaxCrossEntropy()]
+
+    def feedforward(self, X):
+        z = X
+        for layer in self.layers[:-1]:
+            z = layer.forward(z)
+
+        a = softmax(z)
+
+        return a
+
+    def SGD(self, training_data, mini_batch_size, epochs, learning_rate, test_data=None):
+        if test_data:
+            test_size = len(test_data)
+
+        training_size = len(training_data)
+        
+        for epoch in range(epochs):
+            random.shuffle(training_data)
+            mini_batches = [training_data[i: i + mini_batch_size] for i in range(0, training_size, mini_batch_size)]
+
+            for mini_batch in mini_batches:
+                self.update(mini_batch, learning_rate)
+
+            if test_data:
+                print(f"Epoch {epoch}: {self.evaluate(test_data)} / {test_size}")
+
+            else:
+                print(f"Epoch {epoch} complete")
+
+    def update(self, mini_batch, learning_rate):
+        X = np.hstack([x for x, y in mini_batch])
+        Y = np.hstack([y for x, y in mini_batch])
+
+        z = X
+
+        for layer in self.layers:
+            z = layer.forward(z)
+
+        delta = self.layers[-1].backward(Y)
+
+        for layer in reversed(self.layers[:-1]):
+            delta = layer.backward(delta)
+            
+            if isinstance(layer, Linear):
+                layer.weights = layer.weights - learning_rate * layer.grad_w
+                layer.biases = layer.biases - learning_rate * layer.grad_b
+
+            elif isinstance(layer, Convolution):
+                layer.kernel = layer.kernel - learning_rate * layer.grad_K
+                layer.bias = layer.bias - learning_rate * layer.grad_b
+
+
+    def evaluate(self, test_data):
+        test_results = [(np.argmax(self.feedforward(x)), y) for (x, y) in test_data]
+        return sum(int(predicted == actual) for (predicted, actual) in test_results)
+    
+    def visualize_cost(self):
+        return 
 
 class Convolution:
     def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=1):
@@ -142,17 +200,12 @@ class Relu:
     
     
 class SoftMaxCrossEntropy:
-    def __init__(self, logits, labels):
-        #logits (batch_size, outputs)
-        self.logits = logits
-        self.labels = labels
-
     def forward(self, logits, labels): #for use in training only
         self.probs = softmax(logits)
         return cross_entropy(self.probs, labels)
     
-    def backward(self):
-        return self.probs - self.labels
+    def backward(self, labels):
+        return self.probs - labels / len(labels)
 
 class Flatten:
     def forward(self, X):
