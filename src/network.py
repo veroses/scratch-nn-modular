@@ -1,6 +1,9 @@
 import random
 import numpy as np
 
+class LeNet5:
+    def __init__(self):
+        self.layers = [Convolution(1, 6, (5, 5), (2, 2)), Relu(), Pooling((2, 2)), Convolution(6, 16, (5, 5)), ]
 
 class Convolution:
     def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=1):
@@ -130,13 +133,13 @@ class Linear:
         return delta_out @ self.weights
 
 class Relu:
-    def backward(self, delta_out):
-        return delta_out * relu_prime(self.x)
-    
     def forward(self, x):
         self.x = x
         return relu(x)
-
+    
+    def backward(self, delta_out):
+        return delta_out * relu_prime(self.x)
+    
     
 class SoftMaxCrossEntropy:
     def __init__(self, logits, labels):
@@ -150,6 +153,16 @@ class SoftMaxCrossEntropy:
     
     def backward(self):
         return self.probs - self.labels
+
+class Flatten:
+    def forward(self, X):
+        self.dim = X.shape
+        batch_size = self.dim[0]
+        return X.reshape(batch_size, -1)
+    
+    def backward(self, delta_out):
+        delta_in = delta_out.reshape(self.dim)
+        return delta_in
 
 
 def softmax(z_L):
