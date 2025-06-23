@@ -12,6 +12,8 @@ def load_hasy_data(data_dir, test_size=0.2, cache_path="hasy_cache.pkl"):
             training_data, test_data, index_to_label = pickle.load(f)
         return training_data, test_data, index_to_label
     
+    print("loading the slow way...")
+
     csv_path = os.path.join(data_dir, "hasy-data-labels.csv")
     df = pd.read_csv(csv_path)
 
@@ -24,13 +26,13 @@ def load_hasy_data(data_dir, test_size=0.2, cache_path="hasy_cache.pkl"):
 
         with Image.open(img_path).convert("L") as img:  # grayscale
             img_arr = np.asarray(img) / 255.0
-            img_flat = img_arr.flatten()
+            img_arr = np.expand_dims(img_arr, axis=0)
 
-        images.append(img_flat)
+        images.append(img_arr)
         labels.append(label)
 
     images = np.array(images)
-    labels = np.array(labels)
+    labels = np.array(labels)   
 
     unique_labels = np.unique(labels)
     label_to_index = {label: idx for idx, label in enumerate(unique_labels)}
@@ -43,8 +45,8 @@ def load_hasy_data(data_dir, test_size=0.2, cache_path="hasy_cache.pkl"):
         images, y_onehot, test_size=test_size, random_state=42
     )
 
-    training_data = [(x.reshape(-1, 1), y.reshape(-1, 1)) for x, y in zip(x_train, y_train)]
-    test_data = [(x.reshape(-1,1), y.reshape(-1, 1)) for x, y in zip(x_test, y_test)]
+    training_data = [(x, y.reshape(-1, 1)) for x, y in zip(x_train, y_train)]
+    test_data = [(x, y.reshape(-1, 1)) for x, y in zip(x_test, y_test)]
 
     with open("hasy_cache.pkl", "wb") as f:
         pickle.dump((training_data, test_data, index_to_label), f)
