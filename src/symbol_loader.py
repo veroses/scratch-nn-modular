@@ -6,6 +6,7 @@ from sklearn.model_selection import train_test_split
 import pickle
 
 def load_hasy_data(data_dir, test_size=0.2, cache_path="hasy_cache.pkl"):
+    
     if os.path.exists(cache_path):
         print("loading from cache...")
         with open("hasy_cache.pkl", "rb") as f:
