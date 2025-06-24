@@ -91,8 +91,9 @@ class Convolution:
         return delta_in
     
     def im2col_cross_corr(self, X, K, mode="reg"):
+        pad_h, pad_w = self.padding
         if mode == "reg":
-            X = np.pad(X, self.padding)
+            X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
             F, ker_channels, ker_height, ker_width = K.shape
             B, channels, im_height, im_width = X.shape
             stride_h, stride_w = self.stride
@@ -100,7 +101,7 @@ class Convolution:
             output_height = (im_height - ker_height + stride_h) // stride_h
             output_width = (im_width - ker_width + stride_w) // stride_w
 
-            im_matrix = im2col(X, (ker_height, ker_width), self.stride, self.padding)
+            im_matrix = im2col(X, (ker_height, ker_width), self.stride, (output_height, output_width))
 
             kernel_matrix = K.reshape(F, -1)
 
@@ -163,11 +164,28 @@ class Pooling:
     def multi_in_pool(self, X, sample):
             return np.stack([self.pool(X[j], j, sample) for j in range(len(X))])
 
+    def im2col_pool(self, X, channel, sample):
+        pad_h, pad_w = self.padding
+        X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
+        B, channels, x_height, x_width = X.shape
+        stride_v, stride_h = self.stride
+        output_height = (x_height - self.pool_height + stride_v) // stride_v
+        output_width = (x_width - self.pool_width + stride_h) // stride_h
+
+        im_matrix = im2col(X, self.pool_size, self.stride, (output_height, output_width), flatten=False)
+
+        if self.type == "max":
+            pooled = np.max(im_matrix, axis=(-2, -1))
+        else: 
+            pooled = np.mean(im_matrix, axis=(-2, -1))
+
+        return pooled 
+    
     def pool(self, X, channel, sample):
         X = np.pad(X, self.padding)
-
         x_height, x_width = X.shape
         stride_v, stride_h = self.stride
+        
 
         H = np.zeros(((x_height - self.pool_height + stride_v) // stride_v,( x_width - self.pool_width + stride_h) // stride_h))
 
@@ -270,14 +288,11 @@ def cross_entropy(output_a, y):
 def cross_entropy_delta(a, y):
     return a - y
 
-def im2col(X, size, stride, padding):
-    X = np.pad(X, padding)
+def im2col(X, size, stride, output_size, flatten="True"):
     k_width, k_height = size
     B, channels, im_height, im_width = X.shape
     stride_h, stride_w = stride
-
-    output_height = (im_height - k_height + stride_h) // stride_h
-    output_width = (im_width - k_width + stride_w) // stride_w
+    output_height, output_width = output_size
 
     batch_idx = np.arange(B).reshape(B, 1, 1, 1, 1, 1)
     channel_idx = np.arange(channels).reshape(1, channels, 1, 1, 1, 1)
@@ -294,7 +309,8 @@ def im2col(X, size, stride, padding):
     yf_idx = yf_idx.reshape(1, 1, output_height, 1, k_height, 1)
 
     patches = X[batch_idx, channel_idx, yf_idx, xf_idx]
-
-    im_matrix = patches.reshape(B, channels * k_height * k_width, output_height * output_width)
-
-    return im_matrix
+    
+    if flatten:
+        return patches.reshape(B, channels * k_height * k_width, output_height * output_width)
+    else:   
+        return patches
