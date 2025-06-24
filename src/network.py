@@ -72,7 +72,7 @@ class LeNet5:
         return 
 
 class Convolution:
-    def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=1):
+    def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=(1, 1)):
         self.kernel = np.random.randn(num_filters, in_channels, ker_size[0], ker_size[1]) * np.sqrt(2 / ker_size[0])
         self.bias = np.zeros(num_filters)
         self.padding = padding
@@ -90,6 +90,44 @@ class Convolution:
         delta_in = np.sum(self.multi_out_cross_correlate(delta_out, k_rotate, mode="full"))
         return delta_in
     
+    def im2col_cross_corr(self, X, K, mode="reg"):
+        if mode == "reg":
+            X = np.pad(X, self.padding)
+            F, ker_channels, ker_height, ker_width = K.shape
+            B, channels, im_height, im_width = X.shape
+            stride_h, stride_w = self.stride
+
+            output_height = (im_height - ker_height + stride_h) // stride_h
+            output_width = (im_width - ker_width + stride_w) // stride_w
+
+            batch_idx = np.arange(B).reshape(B, 1, 1, 1, 1, 1)
+            channel_idx = np.arange(channels).reshape(1, channels, 1, 1, 1, 1)
+
+            x1_idx = np.arange(0, im_width - ker_width + 1, stride_w)
+            y1_idx = np.arange(0, im_height - ker_height + 1, stride_h)
+
+            x_offsets, y_offsets = np.meshgrid(np.arange(0, ker_width), np.arange(0, ker_height), indexing="ij")
+
+            xf_idx = np.add.outer(x1_idx, x_offsets)
+            yf_idx = np.add.outer(y1_idx, y_offsets)
+
+            xf_idx = xf_idx.reshape(1, 1, 1, output_width, 1, ker_width)
+            yf_idx = yf_idx.reshape(1, 1, output_height, 1, ker_height, 1)
+
+            patches = X[batch_idx, channel_idx, yf_idx, xf_idx]
+
+            im2col = patches.reshape(B, channels * ker_height * ker_width, output_height * output_width)
+
+            kernel_matrix = K.reshape(F, -1)
+
+            output = np.matmul(kernel_matrix[None, :, :], im2col)
+            
+            return output.reshape(B, F, output_height, output_width)
+
+
+
+
+
     def multi_out_cross_correlate(self, X, K, mode="reg"):
         return np.stack([np.stack([self.multi_in_cross_correlate(x, k, mode) for k in K]) for x in X])
 
@@ -98,18 +136,20 @@ class Convolution:
 
     def cross_correlate(self, X, K, mode="reg"):
         ker_height, ker_width = K.shape
-        x_height, x_width = X.shape
+        stride_h, stride_w = self.stride
+        
 
         if mode == "reg":
             X = np.pad(X, self.padding)
-            H = np.zeros(((x_height - ker_height + self.padding[0] + self.stride) // self.stride,( x_width - ker_width + self.padding[1] + self.stride) // self.stride))
+            x_height, x_width = X.shape
+            H = np.zeros(((x_height - ker_height + stride_h) // stride_h,( x_width - ker_width + stride_w) // stride_w))
 
             for i in range(H.shape[0]):
                 for j in range(H.shape[1]):
-                    H[i][j] = np.sum( X[i * self.stride: i * self.stride + ker_height, j * self.stride: j * self.stride + ker_width] * K)
+                    H[i][j] = np.sum( X[i * stride_h: i * stride_h + ker_height, j * stride_w: j * stride_w + ker_width] * K)
             
         elif mode == "full":
-            
+            x_height, x_width = X.shape
             H = np.zeros((x_height + ker_height - 1, x_width + ker_width - 1))
 
             for i in range(H.shape[0]):
