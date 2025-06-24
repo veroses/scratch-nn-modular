@@ -60,8 +60,13 @@ class LeNet5:
 
 
     def evaluate(self, test_data):
-        test_results = [(np.argmax(self.feedforward(x)), y) for (x, y) in test_data]
-        return sum(int(predicted == actual) for (predicted, actual) in test_results)
+        X = np.stack([x for x, y in test_data])
+        Y = np.stack([y for x, y in test_data])
+        outputs = self.feedforward(X)
+        predicted_labels = np.argmax(outputs, axis=1)
+        true_labels = np.argmax(Y, axis=1)
+        accuracy = np.mean(predicted_labels == true_labels)
+        return accuracy
     
     def visualize_cost(self):
         return 
@@ -74,12 +79,10 @@ class Convolution:
         self.stride = stride
 
     def forward(self, X):
-        print(f"convolution input shape: {X.shape}")
         self.X = X
         return self.multi_out_cross_correlate(X, self.kernel) + self.bias.reshape(1, -1, 1, 1)
     
     def backward(self, delta_out):
-        print(f"convolution backward delta_out shape: {delta_out.shape}")
         self.grad_K = np.sum(self.multi_out_cross_correlate(self.X, delta_out)) / delta_out.shape[0]
         self.grad_b = np.sum(delta_out, axis=0) / delta_out.shape[0]
 
@@ -133,7 +136,6 @@ class Pooling:
             self.stride = stride
 
     def forward(self, X):
-        print(f"input to pooling layer shape: {X.shape}")
         self.X = X
         self.route = []
         return np.stack([self.multi_in_pool(X[i], i) for i in range(len(X))])
@@ -164,14 +166,11 @@ class Pooling:
         return H
     
     def backward(self, delta_out):
-        print(f"pooling backward delta_out shape: {delta_out.shape}")
         delta_in = np.zeros_like(self.X)
         if self.type == "max":
             indices = np.array(self.route).T
             delta_vals = delta_out.reshape(-1) #flatten
 
-            print(f"indices shape: {indices.shape}")  # Should be (4, N)
-            print(f"delta_vals shape: {delta_vals.shape}")  # Should be (N,)
             np.add.at(delta_in, (indices[0], indices[1], indices[2], indices[3]), delta_vals)
         else:
             delta_in = np.stack([self.mean_back_pool(y) for y in delta_out])
@@ -191,12 +190,10 @@ class Linear:
         self.weights = np.random.randn(out_dim, in_dim) * np.sqrt(2 / in_dim)
 
     def forward(self, x):
-        print(f"input to linear shape: {x.shape}")
         self.x = x
         return x @ self.weights.T + self.biases
 
     def backward(self, delta_out):
-        print(f"linear backward delta_out shape: {delta_out.shape}")
         self.grad_w = delta_out.T @ self.x / delta_out.shape[0]
         self.grad_b = np.sum(delta_out, axis=0) / delta_out.shape[0]
         return delta_out @ self.weights
@@ -230,10 +227,13 @@ class Flatten:
 
 
 def softmax(z_L):
-        z_stable = z_L - np.max(z_L) #avoid overflow with large z
+        z_stable = z_L - np.max(z_L, axis=1, keepdims=True)
         exp_z = np.exp(z_stable)
-        return exp_z / np.sum(exp_z, axis=1, keepdims=True)
+        sum_exp_z = np.sum(exp_z, axis=1, keepdims=True)
 
+        sum_exp_z = np.where(sum_exp_z == 0, 1e-12, sum_exp_z)
+
+        return exp_z / sum_exp_z
 
 def relu(z):
     return np.maximum(0, z)
