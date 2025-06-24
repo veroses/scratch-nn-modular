@@ -100,33 +100,13 @@ class Convolution:
             output_height = (im_height - ker_height + stride_h) // stride_h
             output_width = (im_width - ker_width + stride_w) // stride_w
 
-            batch_idx = np.arange(B).reshape(B, 1, 1, 1, 1, 1)
-            channel_idx = np.arange(channels).reshape(1, channels, 1, 1, 1, 1)
-
-            x1_idx = np.arange(0, im_width - ker_width + 1, stride_w)
-            y1_idx = np.arange(0, im_height - ker_height + 1, stride_h)
-
-            x_offsets, y_offsets = np.meshgrid(np.arange(0, ker_width), np.arange(0, ker_height), indexing="ij")
-
-            xf_idx = np.add.outer(x1_idx, x_offsets)
-            yf_idx = np.add.outer(y1_idx, y_offsets)
-
-            xf_idx = xf_idx.reshape(1, 1, 1, output_width, 1, ker_width)
-            yf_idx = yf_idx.reshape(1, 1, output_height, 1, ker_height, 1)
-
-            patches = X[batch_idx, channel_idx, yf_idx, xf_idx]
-
-            im2col = patches.reshape(B, channels * ker_height * ker_width, output_height * output_width)
+            im_matrix = im2col(X, (ker_height, ker_width), self.stride, self.padding)
 
             kernel_matrix = K.reshape(F, -1)
 
-            output = np.matmul(kernel_matrix[None, :, :], im2col)
+            output = np.matmul(kernel_matrix[None, :, :], im_matrix)
             
             return output.reshape(B, F, output_height, output_width)
-
-
-
-
 
     def multi_out_cross_correlate(self, X, K, mode="reg"):
         return np.stack([np.stack([self.multi_in_cross_correlate(x, k, mode) for k in K]) for x in X])
@@ -289,3 +269,32 @@ def cross_entropy(output_a, y):
 
 def cross_entropy_delta(a, y):
     return a - y
+
+def im2col(X, size, stride, padding):
+    X = np.pad(X, padding)
+    k_width, k_height = size
+    B, channels, im_height, im_width = X.shape
+    stride_h, stride_w = stride
+
+    output_height = (im_height - k_height + stride_h) // stride_h
+    output_width = (im_width - k_width + stride_w) // stride_w
+
+    batch_idx = np.arange(B).reshape(B, 1, 1, 1, 1, 1)
+    channel_idx = np.arange(channels).reshape(1, channels, 1, 1, 1, 1)
+
+    x1_idx = np.arange(0, im_width - k_width + 1, stride_w)
+    y1_idx = np.arange(0, im_height - k_height + 1, stride_h)
+
+    x_offsets, y_offsets = np.meshgrid(np.arange(0, k_width), np.arange(0, k_height), indexing="ij")
+
+    xf_idx = np.add.outer(x1_idx, x_offsets)
+    yf_idx = np.add.outer(y1_idx, y_offsets)
+
+    xf_idx = xf_idx.reshape(1, 1, 1, output_width, 1, k_width)
+    yf_idx = yf_idx.reshape(1, 1, output_height, 1, k_height, 1)
+
+    patches = X[batch_idx, channel_idx, yf_idx, xf_idx]
+
+    im_matrix = patches.reshape(B, channels * k_height * k_width, output_height * output_width)
+
+    return im_matrix
