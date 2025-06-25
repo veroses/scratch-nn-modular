@@ -90,22 +90,46 @@ class Convolution:
         delta_in = np.sum(self.multi_out_cross_correlate(delta_out, k_rotate, mode="full"))
         return delta_in
     
+    def backward_but_better(self, delta_out): #delta_out.shape = (B, F, output_height, output_width)\
+
+        
+
+        F, ker_channels, ker_height, ker_width = self.kernel.shape
+        #reshape delta_out
+        B, F, dout_height, dout_width = delta_out.shape
+        delta_out = np.reshape(delta_out,( B, F, dout_height * dout_width)) 
+
+        #reshape kernel into k_col
+        kernel_matrix = self.kernel.reshape(F, -1)
+
+        #perform matrix multiplication for dX_col and dK_col
+        dX_col = np.matmul(kernel_matrix.T, delta_out)
+        dK_col = np.matmul(delta_out, self.im_matrix.T)
+
+        #reshape and calculate grad_B
+        self.grad_K = np.sum(dK_col, axis=0).reshape(self.kernel.shape) / B
+        self.grad_b = np.sum(delta_out, axis=0) / B
+        delta_in = col2im(dX_col, self.X, self.kernel.shape, self.stride, self.padding)
+        
+
+        return delta_in
+
     def im2col_cross_corr(self, X, K, mode="reg"):
         pad_h, pad_w = self.padding
         if mode == "reg":
             X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
             F, ker_channels, ker_height, ker_width = K.shape
-            B, channels, im_height, im_width = X.shape
+            B, C, im_height, im_width = X.shape
             stride_h, stride_w = self.stride
 
             output_height = (im_height - ker_height + stride_h) // stride_h
             output_width = (im_width - ker_width + stride_w) // stride_w
 
-            im_matrix = im2col(X, (ker_height, ker_width), self.stride, (output_height, output_width))
+            self.im_matrix = im2col(X, (ker_height, ker_width), self.stride, (output_height, output_width))
 
             kernel_matrix = K.reshape(F, -1)
 
-            output = np.matmul(kernel_matrix[None, :, :], im_matrix)
+            output = np.matmul(kernel_matrix[None, :, :], self.im_matrix)
             
             return output.reshape(B, F, output_height, output_width)
 
@@ -166,7 +190,7 @@ class Pooling:
 
     def im2col_pool(self, X, channel, sample):
         pad_h, pad_w = self.padding
-        X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
+        self.X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
         B, channels, x_height, x_width = X.shape
         stride_v, stride_h = self.stride
         output_height = (x_height - self.pool_height + stride_v) // stride_v
@@ -288,9 +312,9 @@ def cross_entropy(output_a, y):
 def cross_entropy_delta(a, y):
     return a - y
 
-def im2col(X, size, stride, output_size, flatten="True"):
-    k_width, k_height = size
-    B, channels, im_height, im_width = X.shape
+def get_indices(X_shape, k_size, stride, output_size):
+    B, channels, im_height, im_width = X_shape
+    k_height, k_width = k_size
     stride_h, stride_w = stride
     output_height, output_width = output_size
 
@@ -308,9 +332,44 @@ def im2col(X, size, stride, output_size, flatten="True"):
     xf_idx = xf_idx.reshape(1, 1, 1, output_width, 1, k_width)
     yf_idx = yf_idx.reshape(1, 1, output_height, 1, k_height, 1)
 
+    return batch_idx, channel_idx, xf_idx, yf_idx
+
+
+def im2col(X, size, stride, output_size, flatten="True"):
+    k_height, k_width = size
+    B, channels, im_height, im_width = X.shape
+    stride_h, stride_w = stride
+    output_height, output_width = output_size
+
+    batch_idx, channel_idx, xf_idx, yf_idx = get_indices(X.shape, size, stride, output_size)
+
     patches = X[batch_idx, channel_idx, yf_idx, xf_idx]
     
     if flatten:
         return patches.reshape(B, channels * k_height * k_width, output_height * output_width)
     else:   
         return patches
+    
+
+def col2im(dX_col, X, size, stride, padding):
+    pad_h, pad_w = padding
+    k_height, k_width = size
+    B, channels, im_height, im_width = X.shape
+    stride_h, stride_w = stride
+    B, channels, im_height, im_width = X.shape
+    output_height = (im_height - k_height + stride_h) // stride_h
+    output_width = (im_width - k_width + stride_w) // stride_w
+
+    im = np.zeros_like(X)
+
+    batch_idx, channel_idx, xf_idx, yf_idx = get_indices(X.shape, size, (output_height, output_width))
+    
+    np.add.at(im, (batch_idx, channel_idx, xf_idx, yf_idx), dX_col)
+
+    if pad_h == 0 and pad_w == 0:
+        return im
+    else:
+        return im[:, :, pad_h:im.shape[2]-pad_h, pad_w:im.shape[3]-pad_w]
+
+
+
