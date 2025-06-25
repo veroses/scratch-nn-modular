@@ -196,12 +196,13 @@ class Pooling:
         output_height = (x_height - self.pool_height + stride_v) // stride_v
         output_width = (x_width - self.pool_width + stride_h) // stride_h
 
-        im_matrix = im2col(X, self.pool_size, self.stride, (output_height, output_width), flatten=False)
+        self.im_matrix = im2col(X, self.pool_size, self.stride, (output_height, output_width), flatten=False)
 
         if self.type == "max":
-            pooled = np.max(im_matrix, axis=(-2, -1))
+            pooled = np.max(self.im_matrix, axis=(-2, -1))
+            
         else: 
-            pooled = np.mean(im_matrix, axis=(-2, -1))
+            pooled = np.mean(self.im_matrix, axis=(-2, -1))
 
         return pooled 
     
@@ -237,7 +238,42 @@ class Pooling:
         else:
             delta_in = np.stack([self.mean_back_pool(y) for y in delta_out])
         return delta_in
-        
+    
+    def backward_but_better(self, delta_out):
+        B, C, height, width = self.X.shape
+        stride_h, stride_w = self.stride
+        out_h, out_w = delta_out.shape[2:]
+        if self.type == "max":
+            max_indices = np.argmax(self.im_matrix, axis=2)
+
+            #offsets within the window
+            window_row_offset = max_indices // self.pool_width
+            window_col_offset = max_indices % self.pool_height
+
+            #top left indices for each window
+            row_base = np.arange(out_h) * stride_h
+            col_base = np.arange(out_w) * stride_w
+
+            row_base = row_base[None, None, :, :]
+            col_base = col_base[None, None, :, :]
+
+            row_idx = row_base + window_row_offset
+            col_idx = col_base + window_col_offset
+
+            batch_idx = np.arange(B)[:, None, None, None]
+            channel_idx = np.arange(C)[None, :, None, None]
+
+            delta_in = np.zeros_like(self.X)
+            np.add.at(delta_in, (batch_idx, channel_idx, row_idx, col_idx ))
+
+        else:
+            grad_cols = np.repeat(delta_out, self.pool_height * self.pool_width, axis=2) / (self.pool_h * self.pool_w)
+            grad_cols = grad_cols.reshape(B * C, self.pool_height * self.pool_width, out_h * out_w)     
+            
+            delta_in = col2im(grad_cols, self.X, (self.pool_size), self.stride, self.padding)
+
+        return delta_in
+    
     def mean_back_pool(self, Y):
         return np.stack([self.mean_back_pool2D(y) for y in Y])
 
