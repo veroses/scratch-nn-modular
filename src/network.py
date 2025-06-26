@@ -56,7 +56,7 @@ class LeNet5:
 
             elif isinstance(layer, Convolution):
                 layer.kernel = layer.kernel - learning_rate * layer.grad_K
-                layer.bias = layer.bias - learning_rate * np.sum(layer.grad_b, axis=(1, 2))
+                layer.bias -= learning_rate * layer.grad_b
 
 
     def evaluate(self, test_data):
@@ -78,11 +78,11 @@ class Convolution:
         self.padding = padding
         self.stride = stride
 
-    def forward(self, X):
+    def forward_worse(self, X):
         self.X = X
         return self.multi_out_cross_correlate(X, self.kernel) + self.bias.reshape(1, -1, 1, 1)
     
-    def backward(self, delta_out):
+    def backward_but_better(self, delta_out):
         self.grad_K = np.sum(self.multi_out_cross_correlate(self.X, delta_out)) / delta_out.shape[0]
         self.grad_b = np.sum(delta_out, axis=0) / delta_out.shape[0]
 
@@ -90,13 +90,11 @@ class Convolution:
         delta_in = np.sum(self.multi_out_cross_correlate(delta_out, k_rotate, mode="full"))
         return delta_in
     
-    def backward_but_better(self, delta_out): #delta_out.shape = (B, F, output_height, output_width)\
-
-        
-
+    def backward(self, delta_out): #delta_out.shape = (B, F, output_height, output_width)\
         F, ker_channels, ker_height, ker_width = self.kernel.shape
         #reshape delta_out
         B, F, dout_height, dout_width = delta_out.shape
+        self.grad_b = np.sum(delta_out, axis=(0,2,3)) / B
         delta_out = np.reshape(delta_out,( B, F, dout_height * dout_width)) 
 
         #reshape kernel into k_col
@@ -104,34 +102,36 @@ class Convolution:
 
         #perform matrix multiplication for dX_col and dK_col
         dX_col = np.matmul(kernel_matrix.T, delta_out)
-        dK_col = np.matmul(delta_out, self.im_matrix.T)
+
+        im_mat_T = self.im_matrix.transpose(0, 2, 1)      # → (B, D, K)
+        dK_col  = np.matmul(delta_out, im_mat_T)         # → (B, F, K)
 
         #reshape and calculate grad_B
         self.grad_K = np.sum(dK_col, axis=0).reshape(self.kernel.shape) / B
-        self.grad_b = np.sum(delta_out, axis=0) / B
-        delta_in = col2im(dX_col, self.X, self.kernel.shape, self.stride, self.padding)
+        
+        delta_in = col2im(dX_col, self.X, (ker_height, ker_width), self.stride, self.padding)
         
 
         return delta_in
 
-    def im2col_cross_corr(self, X, K, mode="reg"):
+    def forward(self, X):
         pad_h, pad_w = self.padding
-        if mode == "reg":
-            X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
-            F, ker_channels, ker_height, ker_width = K.shape
-            B, C, im_height, im_width = X.shape
-            stride_h, stride_w = self.stride
+    
+        self.X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
+        F, ker_channels, ker_height, ker_width = self.kernel.shape
+        B, C, im_height, im_width = X.shape
+        stride_h, stride_w = self.stride
 
-            output_height = (im_height - ker_height + stride_h) // stride_h
-            output_width = (im_width - ker_width + stride_w) // stride_w
+        output_height = (im_height - ker_height + stride_h) // stride_h
+        output_width = (im_width - ker_width + stride_w) // stride_w
 
-            self.im_matrix = im2col(X, (ker_height, ker_width), self.stride, (output_height, output_width))
+        self.im_matrix = im2col(self.X, (ker_height, ker_width), self.stride, (output_height, output_width))
 
-            kernel_matrix = K.reshape(F, -1)
+        kernel_matrix = self.kernel.reshape(F, -1)
 
-            output = np.matmul(kernel_matrix[None, :, :], self.im_matrix)
-            
-            return output.reshape(B, F, output_height, output_width)
+        output = np.matmul(kernel_matrix[None, :, :], self.im_matrix)
+        
+        return output.reshape(B, F, output_height, output_width) + self.bias.reshape(1, F, 1, 1)
 
     def multi_out_cross_correlate(self, X, K, mode="reg"):
         return np.stack([np.stack([self.multi_in_cross_correlate(x, k, mode) for k in K]) for x in X])
@@ -180,7 +180,7 @@ class Pooling:
         else:
             self.stride = stride
 
-    def forward(self, X):
+    def forward_worse(self, X):
         self.X = X
         self.route = []
         return np.stack([self.multi_in_pool(X[i], i) for i in range(len(X))])
@@ -188,7 +188,7 @@ class Pooling:
     def multi_in_pool(self, X, sample):
             return np.stack([self.pool(X[j], j, sample) for j in range(len(X))])
 
-    def im2col_pool(self, X, channel, sample):
+    def forward(self, X):
         pad_h, pad_w = self.padding
         self.X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
         B, channels, x_height, x_width = X.shape
@@ -196,7 +196,7 @@ class Pooling:
         output_height = (x_height - self.pool_height + stride_v) // stride_v
         output_width = (x_width - self.pool_width + stride_h) // stride_h
 
-        self.im_matrix = im2col(X, self.pool_size, self.stride, (output_height, output_width), flatten=False)
+        self.im_matrix = im2col(self.X, self.pool_size, self.stride, (output_height, output_width), flatten=False)
 
         if self.type == "max":
             pooled = np.max(self.im_matrix, axis=(-2, -1))
@@ -228,7 +228,7 @@ class Pooling:
 
         return H
     
-    def backward(self, delta_out):
+    def backward_but_worse(self, delta_out):
         delta_in = np.zeros_like(self.X)
         if self.type == "max":
             indices = np.array(self.route).T
@@ -239,13 +239,13 @@ class Pooling:
             delta_in = np.stack([self.mean_back_pool(y) for y in delta_out])
         return delta_in
     
-    def backward_but_better(self, delta_out):
+    def backward(self, delta_out):
         B, C, height, width = self.X.shape
         stride_h, stride_w = self.stride
         out_h, out_w = delta_out.shape[2:]
         if self.type == "max":
-            max_indices = np.argmax(self.im_matrix, axis=2)
-
+            flat = self.im_matrix.reshape(B, C, out_h, out_w, -1)
+            max_indices = np.argmax(flat, axis=-1)
             #offsets within the window
             window_row_offset = max_indices // self.pool_width
             window_col_offset = max_indices % self.pool_height
@@ -254,8 +254,8 @@ class Pooling:
             row_base = np.arange(out_h) * stride_h
             col_base = np.arange(out_w) * stride_w
 
-            row_base = row_base[None, None, :, :]
-            col_base = col_base[None, None, :, :]
+            row_base = row_base[None, None, :, None]
+            col_base = col_base[None, None, None, :]
 
             row_idx = row_base + window_row_offset
             col_idx = col_base + window_col_offset
@@ -264,10 +264,10 @@ class Pooling:
             channel_idx = np.arange(C)[None, :, None, None]
 
             delta_in = np.zeros_like(self.X)
-            np.add.at(delta_in, (batch_idx, channel_idx, row_idx, col_idx ))
+            np.add.at(delta_in, (batch_idx, channel_idx, row_idx, col_idx ), delta_out)
 
         else:
-            grad_cols = np.repeat(delta_out, self.pool_height * self.pool_width, axis=2) / (self.pool_h * self.pool_w)
+            grad_cols = np.repeat(delta_out, self.pool_height * self.pool_width, axis=2) / (self.pool_height * self.pool_width)
             grad_cols = grad_cols.reshape(B * C, self.pool_height * self.pool_width, out_h * out_w)     
             
             delta_in = col2im(grad_cols, self.X, (self.pool_size), self.stride, self.padding)
@@ -311,7 +311,7 @@ class SoftMaxCrossEntropy:
         return cross_entropy(self.probs, labels)
     
     def backward(self, labels):
-        return self.probs - labels / len(labels)
+        return (self.probs - labels) / labels.shape[0]
 
 class Flatten:
     def forward(self, X):
@@ -357,16 +357,16 @@ def get_indices(X_shape, k_size, stride, output_size):
     batch_idx = np.arange(B).reshape(B, 1, 1, 1, 1, 1)
     channel_idx = np.arange(channels).reshape(1, channels, 1, 1, 1, 1)
 
-    x1_idx = np.arange(0, im_width - k_width + 1, stride_w)
-    y1_idx = np.arange(0, im_height - k_height + 1, stride_h)
+    x1_idx = np.arange(output_width) * stride_w
+    y1_idx = np.arange(output_height) * stride_h
 
-    x_offsets, y_offsets = np.meshgrid(np.arange(0, k_width), np.arange(0, k_height), indexing="ij")
+    x_offsets, y_offsets = np.meshgrid(np.arange(k_width), np.arange(k_height), indexing="ij")
 
     xf_idx = np.add.outer(x1_idx, x_offsets)
     yf_idx = np.add.outer(y1_idx, y_offsets)
 
-    xf_idx = xf_idx.reshape(1, 1, 1, output_width, 1, k_width)
-    yf_idx = yf_idx.reshape(1, 1, output_height, 1, k_height, 1)
+    xf_idx = xf_idx.reshape(1, 1, 1, output_width, k_height, k_width)
+    yf_idx = yf_idx.reshape(1, 1, output_height, 1, k_height, k_width)
 
     return batch_idx, channel_idx, xf_idx, yf_idx
 
@@ -392,15 +392,24 @@ def col2im(dX_col, X, size, stride, padding):
     k_height, k_width = size
     B, channels, im_height, im_width = X.shape
     stride_h, stride_w = stride
-    B, channels, im_height, im_width = X.shape
-    output_height = (im_height - k_height + stride_h) // stride_h
-    output_width = (im_width - k_width + stride_w) // stride_w
+    og_height = im_height - pad_h * 2
+    og_width = im_width - pad_w * 2
+
+
+    output_height = (og_height - k_height + stride_h) // stride_h
+    output_width = (og_width - k_width + stride_w) // stride_w
 
     im = np.zeros_like(X)
 
-    batch_idx, channel_idx, xf_idx, yf_idx = get_indices(X.shape, size, (output_height, output_width))
-    
-    np.add.at(im, (batch_idx, channel_idx, xf_idx, yf_idx), dX_col)
+    batch_idx, channel_idx, xf_idx, yf_idx = get_indices(X.shape, size, stride, (output_height, output_width))
+
+    b_idx, c_idx, x_idx, y_idx = np.broadcast_arrays(batch_idx, channel_idx, xf_idx, yf_idx)
+    b_idx = b_idx.ravel()
+    c_idx = c_idx.ravel()
+    x_idx = x_idx.ravel()
+    y_idx = y_idx.ravel()
+    vals  = dX_col.reshape(-1)
+    np.add.at(im, (b_idx, c_idx, x_idx, y_idx), vals)
 
     if pad_h == 0 and pad_w == 0:
         return im
