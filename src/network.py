@@ -34,6 +34,7 @@ class LeNet5:
                 print(f"Epoch {epoch} complete")
 
     def update(self, mini_batch, learning_rate, momentum):
+        beta1, beta2, epsilon = 0.9, 0.99, 1e-8
         X = np.stack([x for x, y in mini_batch])
         Y = np.stack([y for x, y in mini_batch])
         Y = np.squeeze(Y, axis=-1)
@@ -51,19 +52,41 @@ class LeNet5:
             delta = layer.backward(delta)
             
             if isinstance(layer, Linear):
-                layer.v_w = momentum * layer.v_w - learning_rate * layer.grad_w
-                layer.v_b = momentum * layer.v_b - learning_rate * layer.grad_b
+                layer.t_step += 1
 
-                layer.weights += layer.v_w
-                layer.biases += layer.v_b
+                layer.m_w = beta1 * layer.m_w + (1 - beta1) * layer.grad_w
+                layer.m_b = beta1 * layer.m_b + (1 - beta1) * layer.grad_b
+
+                layer.v_w = beta2 * layer.v_w + (1 - beta2) * np.square(layer.grad_w)
+                layer.v_b = beta2 * layer.v_b + (1 - beta2) * np.square(layer.grad_b)
+
+                m_w_corr = layer.m_w / (1 - beta1 ** layer.t_step)
+                v_w_corr = layer.v_w / (1 - beta2 ** layer.t_step)
+
+                m_b_corr = layer.m_b / (1 - beta1 ** layer.t_step)
+                v_b_corr = layer.v_b / (1 - beta2 ** layer.t_step)
+
+                layer.weights = layer.weights - learning_rate * m_w_corr / (np.sqrt(v_w_corr) + epsilon)
+                layer.biases = layer.biases - learning_rate * m_b_corr / (np.sqrt(v_b_corr) + epsilon)
                 #print(f"linear grad_w: {layer.grad_w}")
 
             elif isinstance(layer, Convolution):
-                layer.v_K = momentum * layer.v_K - learning_rate * layer.grad_K
-                layer.v_b = momentum * layer.v_b - learning_rate * layer.grad_b
+                layer.t_step += 1
 
-                layer.kernel += layer.v_K
-                layer.bias += layer.v_b
+                layer.m_K = beta1 * layer.m_K + (1 - beta1) * layer.grad_K
+                layer.m_b = beta1 * layer.m_b + (1 - beta1) * layer.grad_b
+
+                layer.v_K = beta2 * layer.v_K + (1 - beta2) * np.square(layer.grad_K)
+                layer.v_b = beta2 * layer.v_b + (1 - beta2) * np.square(layer.grad_b)
+
+                m_w_corr = layer.m_K / (1 - beta1 ** layer.t_step)
+                v_w_corr = layer.v_K / (1 - beta2 ** layer.t_step)
+
+                m_b_corr = layer.m_b / (1 - beta1 ** layer.t_step)
+                v_b_corr = layer.v_b / (1 - beta2 ** layer.t_step)
+
+                layer.kernel = layer.kernel - learning_rate * m_w_corr / (np.sqrt(v_w_corr) + epsilon)
+                layer.bias = layer.bias - learning_rate * m_b_corr / (np.sqrt(v_b_corr) + epsilon)
                 #print(f"convolution grad_k: {layer.grad_K}")
 
     def evaluate(self, test_data):
@@ -88,12 +111,15 @@ class Convolution:
         self.stride = stride
         self.v_K = np.zeros_like(self.kernel)
         self.v_b = np.zeros_like(self.bias)
+        self.m_K = np.zeros_like(self.kernel)
+        self.m_b = np.zeros_like(self.bias)
+        self.t_step = 0
 
-    def forward_worse(self, X):
+    def naive_forward(self, X):
         self.X = X
         return self.multi_out_cross_correlate(X, self.kernel) + self.bias.reshape(1, -1, 1, 1)
     
-    def backward_but_better(self, delta_out):
+    def naive_backward(self, delta_out):
         self.grad_K = np.sum(self.multi_out_cross_correlate(self.X, delta_out)) / delta_out.shape[0]
         self.grad_b = np.sum(delta_out, axis=0) / delta_out.shape[0]
 
@@ -191,14 +217,6 @@ class Pooling:
         else:
             self.stride = stride
 
-    def forward_worse(self, X):
-        self.X = X
-        self.route = []
-        return np.stack([self.multi_in_pool(X[i], i) for i in range(len(X))])
-        
-    def multi_in_pool(self, X, sample):
-            return np.stack([self.pool(X[j], j, sample) for j in range(len(X))])
-
     def forward(self, X):
         pad_h, pad_w = self.padding
         self.X = np.pad(X, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)))
@@ -216,39 +234,6 @@ class Pooling:
             pooled = np.mean(self.im_matrix, axis=(-2, -1))
 
         return pooled 
-    
-    def pool(self, X, channel, sample):
-        X = np.pad(X, self.padding)
-        x_height, x_width = X.shape
-        stride_v, stride_h = self.stride
-        
-
-        H = np.zeros(((x_height - self.pool_height + stride_v) // stride_v,( x_width - self.pool_width + stride_h) // stride_h))
-
-        for i in range(H.shape[0]):
-            for j in range(H.shape[1]):
-                if self.type == "max":
-                    max_val = np.max(X[i * stride_v: i * stride_v + self.pool_height, j * stride_v: j* stride_h + self.pool_width])
-                    H[i][j] = max_val
-                    rows, cols = np.where(X[i * stride_v: i * stride_v + self.pool_height, j * stride_h: j* stride_h + self.pool_width] == max_val)
-                    global_row = stride_v * i + rows[0] - self.padding[0]
-                    global_col = stride_h * j + cols[0] - self.padding[1]
-                    self.route.append((sample, channel, global_row, global_col))
-                else:
-                    H[i][j] = np.mean(X[i * stride_v: i * stride_v + self.pool_height, j * stride_h: j* stride_h + self.pool_width])
-
-        return H
-    
-    def backward_but_worse(self, delta_out):
-        delta_in = np.zeros_like(self.X)
-        if self.type == "max":
-            indices = np.array(self.route).T
-            delta_vals = delta_out.reshape(-1) #flatten
-
-            np.add.at(delta_in, (indices[0], indices[1], indices[2], indices[3]), delta_vals)
-        else:
-            delta_in = np.stack([self.mean_back_pool(y) for y in delta_out])
-        return delta_in
     
     def backward(self, delta_out):
         B, C, height, width = self.X.shape
@@ -285,6 +270,47 @@ class Pooling:
 
         return delta_in
     
+    def naive_forward(self, X):
+        self.X = X
+        self.route = []
+        return np.stack([self.multi_in_pool(X[i], i) for i in range(len(X))])
+        
+    def multi_in_pool(self, X, sample):
+            return np.stack([self.pool(X[j], j, sample) for j in range(len(X))])
+
+    def pool(self, X, channel, sample):
+        X = np.pad(X, self.padding)
+        x_height, x_width = X.shape
+        stride_v, stride_h = self.stride
+        
+
+        H = np.zeros(((x_height - self.pool_height + stride_v) // stride_v,( x_width - self.pool_width + stride_h) // stride_h))
+
+        for i in range(H.shape[0]):
+            for j in range(H.shape[1]):
+                if self.type == "max":
+                    max_val = np.max(X[i * stride_v: i * stride_v + self.pool_height, j * stride_v: j* stride_h + self.pool_width])
+                    H[i][j] = max_val
+                    rows, cols = np.where(X[i * stride_v: i * stride_v + self.pool_height, j * stride_h: j* stride_h + self.pool_width] == max_val)
+                    global_row = stride_v * i + rows[0] - self.padding[0]
+                    global_col = stride_h * j + cols[0] - self.padding[1]
+                    self.route.append((sample, channel, global_row, global_col))
+                else:
+                    H[i][j] = np.mean(X[i * stride_v: i * stride_v + self.pool_height, j * stride_h: j* stride_h + self.pool_width])
+
+        return H
+    
+    def naive_backward(self, delta_out):
+        delta_in = np.zeros_like(self.X)
+        if self.type == "max":
+            indices = np.array(self.route).T
+            delta_vals = delta_out.reshape(-1) #flatten
+
+            np.add.at(delta_in, (indices[0], indices[1], indices[2], indices[3]), delta_vals)
+        else:
+            delta_in = np.stack([self.mean_back_pool(y) for y in delta_out])
+        return delta_in
+    
     def mean_back_pool(self, Y):
         return np.stack([self.mean_back_pool2D(y) for y in Y])
 
@@ -299,6 +325,11 @@ class Linear:
         self.weights = np.random.randn(out_dim, in_dim) * np.sqrt(2 / in_dim)
         self.v_w = np.zeros_like(self.weights)
         self.v_b = np.zeros_like(self.biases)
+        self.m_w = np.zeros_like(self.weights)
+        self.m_b = np.zeros_like(self.biases)
+        self.t_step = 0
+        self.m_w_corr = np.zeros_like(self.weights)
+        self.m_b_corr = np.zeros_like(self.biases)
 
     def forward(self, x):
         self.x = x
