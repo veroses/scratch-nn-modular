@@ -14,7 +14,7 @@ class LeNet5:
 
         return a
 
-    def SGD(self, training_data, mini_batch_size, epochs, learning_rate, test_data=None):
+    def SGD(self, training_data, mini_batch_size, epochs, learning_rate, momentum, test_data=None):
         if test_data:
             test_size = len(test_data)
 
@@ -25,7 +25,7 @@ class LeNet5:
             mini_batches = [training_data[i: i + mini_batch_size] for i in range(0, training_size, mini_batch_size)]
 
             for mini_batch in mini_batches:
-                self.update(mini_batch, learning_rate)
+                self.update(mini_batch, learning_rate, momentum)
 
             if test_data:
                 print(f"Epoch {epoch}: {self.evaluate(test_data)} / {test_size}")
@@ -33,7 +33,7 @@ class LeNet5:
             else:
                 print(f"Epoch {epoch} complete")
 
-    def update(self, mini_batch, learning_rate):
+    def update(self, mini_batch, learning_rate, momentum):
         X = np.stack([x for x, y in mini_batch])
         Y = np.stack([y for x, y in mini_batch])
         Y = np.squeeze(Y, axis=-1)
@@ -51,21 +51,30 @@ class LeNet5:
             delta = layer.backward(delta)
             
             if isinstance(layer, Linear):
-                layer.weights = layer.weights - learning_rate * layer.grad_w
-                layer.biases = layer.biases - learning_rate * layer.grad_b
+                layer.v_w = momentum * layer.v_w - learning_rate * layer.grad_w
+                layer.v_b = momentum * layer.v_b - learning_rate * layer.grad_b
+
+                layer.weights += layer.v_w
+                layer.biases += layer.v_b
+                #print(f"linear grad_w: {layer.grad_w}")
 
             elif isinstance(layer, Convolution):
-                layer.kernel = layer.kernel - learning_rate * layer.grad_K
-                layer.bias -= learning_rate * layer.grad_b
+                layer.v_K = momentum * layer.v_K - learning_rate * layer.grad_K
+                layer.v_b = momentum * layer.v_b - learning_rate * layer.grad_b
 
+                layer.kernel += layer.v_K
+                layer.bias += layer.v_b
+                #print(f"convolution grad_k: {layer.grad_K}")
 
     def evaluate(self, test_data):
         X = np.stack([x for x, y in test_data])
         Y = np.stack([y for x, y in test_data])
         outputs = self.feedforward(X)
         predicted_labels = np.argmax(outputs, axis=1)
-        true_labels = np.argmax(Y, axis=1)
-        accuracy = np.mean(predicted_labels == true_labels)
+        true_labels = np.argmax(Y, axis=1).flatten()
+
+
+        accuracy = np.sum(predicted_labels == true_labels)
         return accuracy
     
     def visualize_cost(self):
@@ -77,6 +86,8 @@ class Convolution:
         self.bias = np.zeros(num_filters)
         self.padding = padding
         self.stride = stride
+        self.v_K = np.zeros_like(self.kernel)
+        self.v_b = np.zeros_like(self.bias)
 
     def forward_worse(self, X):
         self.X = X
@@ -286,6 +297,8 @@ class Linear:
     def __init__(self, in_dim, out_dim):
         self.biases = np.zeros(out_dim,)
         self.weights = np.random.randn(out_dim, in_dim) * np.sqrt(2 / in_dim)
+        self.v_w = np.zeros_like(self.weights)
+        self.v_b = np.zeros_like(self.biases)
 
     def forward(self, x):
         self.x = x
