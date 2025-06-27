@@ -137,20 +137,88 @@ class Linear:
         return x @ self.weights.T + self.biases
 
     def backward(self, delta_out):
-        self.grad_w = delta_out.T @ self.x / delta_out.shape[0]
-        self.grad_b = np.sum(delta_out, axis=0) / delta_out.shape[0]
+        self.grad_w = delta_out.T @ self.x
+        self.grad_b = np.sum(delta_out, axis=0)
         return delta_out @ self.weights
 
+class Batch_NormFC:
+    def __init__(self, channels, epsilon=1e-8):
+        self.gamma = np.ones(channels)
+        self.beta = np.ones(channels)
+        self.epsilon = epsilon
+
+    def forward(self, X):
+        self.X = X
+
+        self.mean = np.mean(X, axis=0)
+        self.variance = np.var(X, axis=0)
+
+        self.X_norm = (X - self.mean) / np.sqrt(self.variance + self.epsilon)
+
+        out = self.X_norm * self.gamma + self.beta
+        return out
+
+    def backward(self, delta_out): #shape (B, C)
+        M, C = delta_out.shape
+        self.grad_w = np.sum(delta_out * self.X_norm, axis=0)
+        self.grad_b = np.sum(delta_out, axis=0)
+
+        std_inv = 1. / np.sqrt(self.variance + self.epsilon)
+
+        delta_x_norm = delta_out * self.gamma
+        delta_v = np.sum(delta_out * (self.X - self.mean) * (-0.5 * self.gamma * ( self.variance + self.epsilon) ** (-3/2)), axis=0)
+        delta_m = np.sum(delta_out * (-self.gamma * std_inv), axis=0) + delta_v * (1/M) * np.sum(-2 * (self.X - self.mean), axis=0)
+
+        delta_in = delta_x_norm * std_inv + delta_v * 2 * (self.X - self.mean) / M + delta_m / M
+        return delta_in
+    
+class Batch_NormConv:
+    def __init__(self, channels, epsilon=1e-8):
+        self.gamma = np.ones(channels)
+        self.beta = np.ones(channels)
+        self.epsilon = epsilon
+
+    def forward(self, X):
+        self.X = X
+
+        self.mean = np.mean(X, axis=(0, 2, 3), keepdims=True)
+        self.variance = np.var(X, axis=(0, 2, 3), keepdims=True)
+
+        self.X_norm = (X - self.mean) / np.sqrt(self.variance + self.epsilon)
+
+        gamma = self.gamma.reshape(1, -1, 1, 1)
+        beta = self.beta.reshape(1, -1, 1, 1)
+
+        out = self.X_norm * gamma + beta
+        return out
+
+    def backward(self, delta_out):
+        B, C, H, W = delta_out.shape
+        self.grad_w = np.sum(delta_out * self.X_norm, axis=(0, 2, 3))
+        self.grad_b = np.sum(delta_out, axis=(0, 2, 3))
+
+        gamma = self.gamma.reshape(1, -1, 1, 1)
+        std_inv = 1. / np.sqrt(self.variance + self.epsilon)
+
+        delta_x_norm = delta_out * gamma
+        delta_v = np.sum(delta_out * (self.X - self.mean) * (-0.5 * gamma * ( self.variance + self.epsilon) ** (-3/2)), axis=(0, 2, 3), keepdims=True)
+        delta_m = np.sum(delta_out * (-gamma * std_inv), axis=(0, 2, 3), keepdims=True) + delta_v * (1/(B * H * W)) * np.sum(-2 * (self.X - self.mean), axis=(0, 2, 3), keepdims=True)
+
+        delta_in = delta_x_norm * std_inv + delta_v * 2 * (self.X - self.mean) / (B * H * W) + delta_m / (B * H * W)
+        return delta_in
+    
+
+    
 
 class Relu:
-    def forward(self, x):
-        self.x = x
-        return relu(x)
+    def forward(self, X):
+        self.X = X
+        return relu(X)
     
     def backward(self, delta_out):
-        return delta_out * relu_prime(self.x)
-    
-    
+        return delta_out * relu_prime(self.X)
+
+
 class SoftMaxCrossEntropy:
     def forward(self, logits, labels): #for use in training only
         self.probs = softmax(logits)
