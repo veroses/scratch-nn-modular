@@ -1,6 +1,7 @@
 import random
 import numpy as np
 from utility import *
+import time
 
 class Convolution:
     def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=(1, 1)):
@@ -33,6 +34,8 @@ class Convolution:
         output = np.matmul(kernel_matrix[None, :, :], self.im_matrix)
         
         return output.reshape(B, F, output_height, output_width) + self.biases.reshape(1, F, 1, 1)
+    
+    
     
     def backward(self, delta_out): #delta_out -> (B, F, output_height, output_width)\
         _, _, ker_height, ker_width = self.kernel.shape
@@ -148,66 +151,71 @@ class Batch_NormFC:
         self.epsilon = epsilon
 
     def forward(self, X):
+        start = time.time()
         self.X = X
 
         self.mean = np.mean(X, axis=0)
         self.variance = np.var(X, axis=0)
-
-        self.X_norm = (X - self.mean) / np.sqrt(self.variance + self.epsilon)
+        self.X_center = self.X - self.mean
+        self.X_norm = self.X_center / np.sqrt(self.variance + self.epsilon)
 
         out = self.X_norm * self.gamma + self.beta
+
+        #print("BatchNormFC forward time:", time.time() - start)
         return out
 
     def backward(self, delta_out): #shape (B, C)
+        start = time.time()
         M, C = delta_out.shape
         self.grad_w = np.sum(delta_out * self.X_norm, axis=0)
         self.grad_b = np.sum(delta_out, axis=0)
 
         std_inv = 1. / np.sqrt(self.variance + self.epsilon)
+        factor = -0.5 * self.gamma * ( self.variance + self.epsilon) ** (-3/2)
 
         delta_x_norm = delta_out * self.gamma
-        delta_v = np.sum(delta_out * (self.X - self.mean) * (-0.5 * self.gamma * ( self.variance + self.epsilon) ** (-3/2)), axis=0)
-        delta_m = np.sum(delta_out * (-self.gamma * std_inv), axis=0) + delta_v * (1/M) * np.sum(-2 * (self.X - self.mean), axis=0)
+        delta_v = np.sum(delta_out * self.X_center * factor, axis=0)
+        delta_m = np.sum(delta_out * (-self.gamma * std_inv), axis=0) + delta_v * (1/M) * np.sum(-2 * self.X_center, axis=0)
 
-        delta_in = delta_x_norm * std_inv + delta_v * 2 * (self.X - self.mean) / M + delta_m / M
+        delta_in = delta_x_norm * std_inv + delta_v * 2 * self.X_center / M + delta_m / M
+        #print("BatchNormFC backward time:", time.time() - start)
         return delta_in
     
 class Batch_NormConv:
     def __init__(self, channels, epsilon=1e-8):
-        self.gamma = np.ones(channels)
-        self.beta = np.ones(channels)
+        self.gamma = np.ones((1, channels, 1, 1))
+        self.beta = np.ones((1, channels, 1, 1))
         self.epsilon = epsilon
 
     def forward(self, X):
+        start = time.time()
         self.X = X
 
         self.mean = np.mean(X, axis=(0, 2, 3), keepdims=True)
         self.variance = np.var(X, axis=(0, 2, 3), keepdims=True)
+        self.X_center = self.X - self.mean
+        self.X_norm = self.X_center / np.sqrt(self.variance + self.epsilon)
 
-        self.X_norm = (X - self.mean) / np.sqrt(self.variance + self.epsilon)
-
-        gamma = self.gamma.reshape(1, -1, 1, 1)
-        beta = self.beta.reshape(1, -1, 1, 1)
-
-        out = self.X_norm * gamma + beta
+        out = self.X_norm * self.gamma + self.beta
+        #print("BatchNormConv forward time:", time.time() - start)
         return out
 
     def backward(self, delta_out):
+        start = time.time()
         B, C, H, W = delta_out.shape
-        self.grad_w = np.sum(delta_out * self.X_norm, axis=(0, 2, 3))
-        self.grad_b = np.sum(delta_out, axis=(0, 2, 3))
+        self.grad_w = np.sum(delta_out * self.X_norm, axis=(0, 2, 3), keepdims=True)
+        self.grad_b = np.sum(delta_out, axis=(0, 2, 3), keepdims=True)
 
-        gamma = self.gamma.reshape(1, -1, 1, 1)
         std_inv = 1. / np.sqrt(self.variance + self.epsilon)
+        factor = -0.5 * self.gamma * ( self.variance + self.epsilon) ** (-3/2)
 
-        delta_x_norm = delta_out * gamma
-        delta_v = np.sum(delta_out * (self.X - self.mean) * (-0.5 * gamma * ( self.variance + self.epsilon) ** (-3/2)), axis=(0, 2, 3), keepdims=True)
-        delta_m = np.sum(delta_out * (-gamma * std_inv), axis=(0, 2, 3), keepdims=True) + delta_v * (1/(B * H * W)) * np.sum(-2 * (self.X - self.mean), axis=(0, 2, 3), keepdims=True)
+        delta_x_norm = delta_out * self.gamma
+        delta_v = np.sum(delta_out * self.X_center * factor, axis=(0, 2, 3), keepdims=True)
+        delta_m = np.sum(delta_out * (-self.gamma * std_inv), axis=(0, 2, 3), keepdims=True) + delta_v * (1/(B * H * W)) * np.sum(-2 * (self.X_center), axis=(0, 2, 3), keepdims=True)
 
-        delta_in = delta_x_norm * std_inv + delta_v * 2 * (self.X - self.mean) / (B * H * W) + delta_m / (B * H * W)
+        delta_in = delta_x_norm * std_inv + delta_v * 2 * self.X_center / (B * H * W) + delta_m / (B * H * W)
+        #print("BatchNormConv backward time:", time.time() - start)
         return delta_in
-    
-
     
 
 class Relu:
