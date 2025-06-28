@@ -48,7 +48,7 @@ def get_indices(X_shape, k_size, stride, output_size):
     return batch_idx, channel_idx, xf_idx, yf_idx
 
 
-def im2col(X, size, stride, output_size, flatten="True"):
+def im2col(X, size, stride, output_size, flatten="True"): #X is padded
     k_height, k_width = size
     B, channels, im_height, im_width = X.shape
     stride_h, stride_w = stride
@@ -64,7 +64,7 @@ def im2col(X, size, stride, output_size, flatten="True"):
         return patches
     
 
-def col2im(dX_col, X, size, stride, padding):
+def col2im(dX_col, X, size, stride, padding): #X is padded
     pad_h, pad_w = padding
     k_height, k_width = size
     B, channels, im_height, im_width = X.shape
@@ -83,6 +83,7 @@ def col2im(dX_col, X, size, stride, padding):
     x_idx = x_idx.ravel()
     y_idx = y_idx.ravel()
     vals = dX_col.reshape(-1)
+    
     np.add.at(im, (b_idx, c_idx, x_idx, y_idx), vals)
 
     if pad_h == 0 and pad_w == 0:
