@@ -53,9 +53,10 @@ class Adam(Optimizer):
             self.velocity[key] = self.beta2 * self.velocity[key] + (1 - self.beta2) * np.square(grads[key])
 
             moment_corr = self.moment[key] / (1 - self.beta1 ** self.t)
-            velocity_corr = self.moment[key] / (1 - self.beta2 ** self.t)
+            velocity_corr = self.velocity[key] / (1 - self.beta2 ** self.t)
 
-            grads[key] -= self.learning_rate * self.moment[key] / (np.sqrt(self.velocity[key]) + self.epsilon)  
+            params[key] -= self.learning_rate * moment_corr / (np.sqrt(velocity_corr) + self.epsilon)  
+
 
 def get_optimizer(name, **kwargs):
     if name.lower() == "sgd":
