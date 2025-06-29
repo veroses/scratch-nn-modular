@@ -1,1 +1,1 @@
-# optimization-benchmarking
+# modular scratch neural network
