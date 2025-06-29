@@ -1,7 +1,8 @@
-import random
 import numpy as np
 from layers import *
 from abc import ABC, abstractmethod
+
+##TODO: implement RMSProp
 
 '''
 params is a dict of parameters (weights and biases)
@@ -26,13 +27,13 @@ class SGD(Optimizer):
     def update(self, params, grads):
         for key in params:
             if key not in self.velocity:
-                self.velocity[key] = 0
+                self.velocity[key] = np.zeros_like(params[key])
 
             self.velocity[key] = self.momentum * self.velocity[key] - self.learning_rate * grads[key]
             params[key] += self.velocity[key]
 
 class Adam(Optimizer):
-    def __init__(self, learning_rate=0.001, beta1=0.99, beta2=0.9, epsilon=1e-8):
+    def __init__(self, learning_rate=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8):
         super().__init__(learning_rate)
         self.beta1 = beta1
         self.beta2 = beta2
@@ -46,8 +47,8 @@ class Adam(Optimizer):
         self.t += 1
         for key in params:
             if key not in self.moment:
-                self.moment[key] = 0
-                self.velocity[key] = 0
+                self.moment[key] = np.zeros_like(params[key])
+                self.velocity[key] = np.zeros_like(params[key])
 
             self.moment[key] = self.beta1 * self.moment[key] + (1 -  self.beta1) * grads[key]
             self.velocity[key] = self.beta2 * self.velocity[key] + (1 - self.beta2) * np.square(grads[key])

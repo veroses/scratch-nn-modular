@@ -1,3 +1,6 @@
 data/
-src/__pycache__
 hasy_cache.pkl
+venv/
+__pycache__/
+*.pyc
+*.pyo

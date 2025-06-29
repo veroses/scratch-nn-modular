@@ -1,20 +1,42 @@
 import random
 import numpy as np
-from utility import *
+from scratch_nn.utils import *
 import time
+from abc import ABC, abstractmethod
+from optimization import *
 
-class Convolution:
+class Layer(ABC):
+    def __init__(self):
+        self.params = {}
+        self.grads = {}
+
+    @abstractmethod
+    def forward(self, X):
+        pass
+
+    @abstractmethod
+    def backward(self, X):
+        pass
+
+    def set_mode(self, train=True):
+        pass
+
+
+'''
+    for the convolutional layer, we utilize full vectorizaion and im2col/col2m
+    in forward/backward passes to reach realistic training times. we pass in output_size instead of padding
+    into im2col in order to avoid having to calculate the output size twice, both inside and outside the function. 
+    '''
+
+class Convolution(Layer):
     def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=(1, 1)):
         self.kernel = np.random.randn(num_filters, in_channels, ker_size[0], ker_size[1]) * np.sqrt(2 / ker_size[0])
         self.biases = np.zeros(num_filters)
         self.padding = padding
         self.stride = stride
 
-    '''
-    for the convolutional layer, we utilize full vectorizaion and im2col/col2m
-    in forward/backward passes to reach realistic training times. we pass in output_size instead of padding
-    into im2col in order to avoid having to calculate the output size twice, both inside and outside the function. 
-    '''
+        self.params = {"k": self.kernel, "b": self.biases}
+        self.grads = {"k": np.zeros_like(self.kernel), "b": np.zeros_like(self.biases)}
 
     def forward(self, X):
         pad_h, pad_w = self.padding
@@ -41,7 +63,7 @@ class Convolution:
         _, _, ker_height, ker_width = self.kernel.shape
         B, F, dout_height, dout_width = delta_out.shape
         
-        self.grad_b = np.sum(delta_out, axis=(0,2,3)) / B
+        self.grads["b"] = np.sum(delta_out, axis=(0,2,3)) / B
 
         delta_out = np.reshape(delta_out,( B, F, dout_height * dout_width)) 
 
@@ -52,13 +74,19 @@ class Convolution:
         im_mat_T = self.im_matrix.transpose(0, 2, 1)      # (B, D, K)
         dK_col  = np.matmul(delta_out, im_mat_T)         # (B, F, K)
 
-        self.grad_w = np.sum(dK_col, axis=0).reshape(self.kernel.shape) / B
+        self.grads["k"] = np.sum(dK_col, axis=0).reshape(self.kernel.shape) / B
         delta_in = col2im(dX_col, self.X, (ker_height, ker_width), self.stride, self.padding)
 
         return delta_in
 
 
-class Pooling:
+'''
+    similarly, we utilize im2col and col2im for the forward and backward passes in the pooling layer. once again, we pad the input X
+    beforehand, for consistency. due to the use of these functions, the mask used in the naive implementations is not required in the 
+    backwards pass. instead we calculate the indices of the max value in each window and use np.addat to recover the layer gradient.
+    '''
+
+class Pooling(Layer):
     def __init__(self, pool_size, type="max", padding=(0,0), stride=None):
         self.pool_size = pool_size
         self.pool_height, self.pool_width = pool_size
@@ -69,11 +97,7 @@ class Pooling:
         else:
             self.stride = stride
 
-    '''
-    similarly, we utilize im2col and col2im for the forward and backward passes in the pooling layer. once again, we pad the input X
-    beforehand, for consistency. due to the use of these functions, the mask used in the naive implementations is not required in the 
-    backwards pass. instead we calculate the indices of the max value in each window and use np.addat to recover the layer gradient.
-    '''
+    
 
     def forward(self, X):
         pad_h, pad_w = self.padding
@@ -130,113 +154,25 @@ class Pooling:
         return delta_in
 
     
-class Linear:
+class Linear(Layer):
     def __init__(self, in_dim, out_dim):
         self.biases = np.zeros(out_dim,)
         self.weights = np.random.randn(out_dim, in_dim) * np.sqrt(2 / in_dim)
+
+        self.params = {"w": self.weights, "b": self.biases}
+        self.grads = {"w": np.zeros_like(self.weights), "b": np.zeros_like(self.weights)}
 
     def forward(self, x):
         self.x = x
         return x @ self.weights.T + self.biases
 
     def backward(self, delta_out):
-        self.grad_w = delta_out.T @ self.x
-        self.grad_b = np.sum(delta_out, axis=0)
+        self.grads["w"] = delta_out.T @ self.x
+        self.grads["b"] = np.sum(delta_out, axis=0)
         return delta_out @ self.weights
 
-class Batch_NormFC:
-    def __init__(self, channels, epsilon=1e-8):
-        self.gamma = np.ones(channels)
-        self.beta = np.ones(channels)
-        self.epsilon = epsilon
 
-    def forward(self, X):
-        start = time.time()
-        self.X = X
-
-        self.mean = np.mean(X, axis=0)
-        self.variance = np.var(X, axis=0)
-        self.X_center = self.X - self.mean
-        self.X_norm = self.X_center / np.sqrt(self.variance + self.epsilon)
-
-        out = self.X_norm * self.gamma + self.beta
-
-        #print("BatchNormFC forward time:", time.time() - start)
-        return out
-
-    def backward(self, delta_out): #shape (B, C)
-        start = time.time()
-        M, C = delta_out.shape
-        self.grad_w = np.sum(delta_out * self.X_norm, axis=0)
-        self.grad_b = np.sum(delta_out, axis=0)
-
-        std_inv = 1. / np.sqrt(self.variance + self.epsilon)
-        factor = -0.5 * self.gamma * ( self.variance + self.epsilon) ** (-3/2)
-
-        delta_x_norm = delta_out * self.gamma
-        delta_v = np.sum(delta_out * self.X_center * factor, axis=0)
-        delta_m = np.sum(delta_out * (-self.gamma * std_inv), axis=0) + delta_v * (1/M) * np.sum(-2 * self.X_center, axis=0)
-
-        delta_in = delta_x_norm * std_inv + delta_v * 2 * self.X_center / M + delta_m / M
-        #print("BatchNormFC backward time:", time.time() - start)
-        return delta_in
-    
-class Batch_NormConv:
-    def __init__(self, channels, epsilon=1e-8):
-        self.gamma = np.ones((1, channels, 1, 1))
-        self.beta = np.ones((1, channels, 1, 1))
-        self.epsilon = epsilon
-
-    def forward(self, X):
-        start = time.time()
-        self.X = X
-
-        self.mean = np.mean(X, axis=(0, 2, 3), keepdims=True)
-        self.variance = np.var(X, axis=(0, 2, 3), keepdims=True)
-        self.X_center = self.X - self.mean
-        self.X_norm = self.X_center / np.sqrt(self.variance + self.epsilon)
-
-        out = self.X_norm * self.gamma + self.beta
-        #print("BatchNormConv forward time:", time.time() - start)
-        return out
-
-    def backward(self, delta_out):
-        start = time.time()
-        B, C, H, W = delta_out.shape
-        self.grad_w = np.sum(delta_out * self.X_norm, axis=(0, 2, 3), keepdims=True)
-        self.grad_b = np.sum(delta_out, axis=(0, 2, 3), keepdims=True)
-
-        std_inv = 1. / np.sqrt(self.variance + self.epsilon)
-        factor = -0.5 * self.gamma * ( self.variance + self.epsilon) ** (-3/2)
-
-        delta_x_norm = delta_out * self.gamma
-        delta_v = np.sum(delta_out * self.X_center * factor, axis=(0, 2, 3), keepdims=True)
-        delta_m = np.sum(delta_out * (-self.gamma * std_inv), axis=(0, 2, 3), keepdims=True) + delta_v * (1/(B * H * W)) * np.sum(-2 * (self.X_center), axis=(0, 2, 3), keepdims=True)
-
-        delta_in = delta_x_norm * std_inv + delta_v * 2 * self.X_center / (B * H * W) + delta_m / (B * H * W)
-        #print("BatchNormConv backward time:", time.time() - start)
-        return delta_in
-    
-
-class Relu:
-    def forward(self, X):
-        self.X = X
-        return relu(X)
-    
-    def backward(self, delta_out):
-        return delta_out * relu_prime(self.X)
-
-
-class SoftMaxCrossEntropy:
-    def forward(self, logits, labels): #for use in training only
-        self.probs = softmax(logits)
-        return cross_entropy(self.probs, labels)
-    
-    def backward(self, labels):
-        return (self.probs - labels) / labels.shape[0]
-
-
-class Flatten:
+class Flatten(Layer):
     def forward(self, X):
         self.dim = X.shape
         batch_size = self.dim[0]
@@ -247,12 +183,15 @@ class Flatten:
         return delta_in
     
     
-class Naive_Convolution:
+class Naive_Convolution(Layer):
     def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=(1, 1)):
         self.kernel = np.random.randn(num_filters, in_channels, ker_size[0], ker_size[1]) * np.sqrt(2 / ker_size[0])
         self.biases = np.zeros(num_filters)
         self.padding = padding
         self.stride = stride
+
+        self.params = {"k": self.kernel, "b": self.biases}
+        self.grads = {"k": np.zeros_like(self.kernel), "b": np.zeros_like(self.biases)}
 
     '''
     below are the naive implementations using nested for loops. we reuse cross_correlate for the convolution
@@ -264,8 +203,8 @@ class Naive_Convolution:
         return self.multi_out_cross_correlate(X, self.kernel) + self.bias.reshape(1, -1, 1, 1)
     
     def naive_backward(self, delta_out):
-        self.grad_w = np.sum(self.multi_out_cross_correlate(self.X, delta_out)) / delta_out.shape[0]
-        self.grad_b = np.sum(delta_out, axis=0) / delta_out.shape[0]
+        self.grads["k"] = np.sum(self.multi_out_cross_correlate(self.X, delta_out)) / delta_out.shape[0]
+        self.grads["b"] = np.sum(delta_out, axis=0) / delta_out.shape[0]
 
         k_rotate = np.flip(self.kernel, (-1, -2))
         delta_in = np.sum(self.multi_out_cross_correlate(delta_out, k_rotate, mode="full"))
@@ -308,7 +247,7 @@ class Naive_Convolution:
         return H
 
 
-class Naive_Pooling:
+class Naive_Pooling(Layer):
     def __init__(self, pool_size, type="max", padding=(0,0), stride=None):
         self.pool_size = pool_size
         self.pool_height, self.pool_width = pool_size
