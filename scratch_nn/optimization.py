@@ -1,5 +1,5 @@
 import numpy as np
-from layers import *
+from .layers import *
 from abc import ABC, abstractmethod
 
 ##TODO: implement RMSProp

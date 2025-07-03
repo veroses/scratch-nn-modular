@@ -1,6 +1,7 @@
-from layers import Layer
+from .layers import Layer
 import numpy as np
 
+#TODO: add sigmoid
 
 class Relu(Layer):
     def forward(self, X):

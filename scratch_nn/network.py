@@ -1,8 +1,8 @@
 import random
 import numpy as np
-from layers import *
-from optimization import *
-from losses import *
+from .layers import *
+from .optimization import *
+from .losses import *
 
 class Network:
     def __init__(self, layers, optimizer, **kwargs):
@@ -34,7 +34,6 @@ class Network:
             average_loss = epoch_loss / mini_batch_size
             self.losses.append(average_loss)
             
-            print(f"epoch {epoch} done, waiting for evaluate")
             if test_data:
                     print(f"Epoch {epoch}: {self.evaluate(test_data)} / {test_size}")
             else:

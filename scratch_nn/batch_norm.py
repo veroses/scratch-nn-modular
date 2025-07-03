@@ -1,4 +1,4 @@
-from layers import Layer
+from .layers import Layer
 import numpy as np
 
 #TODO: add mode switching
