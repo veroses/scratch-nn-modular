@@ -1,6 +1,7 @@
 from layers import Layer
 import numpy as np
 
+#TODO: add mode switching
 
 class BatchNormFC(Layer):
     def __init__(self, channels, epsilon=1e-8):

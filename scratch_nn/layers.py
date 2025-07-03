@@ -1,7 +1,5 @@
-import random
 import numpy as np
 from scratch_nn.utils import *
-import time
 from abc import ABC, abstractmethod
 from optimization import *
 

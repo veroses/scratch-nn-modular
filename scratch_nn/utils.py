@@ -1,30 +1,6 @@
 import numpy as np
 
 
-def softmax(z_L):
-        z_stable = z_L - np.max(z_L, axis=1, keepdims=True)
-        exp_z = np.exp(z_stable)
-        sum_exp_z = np.sum(exp_z, axis=1, keepdims=True)
-
-        sum_exp_z = np.where(sum_exp_z == 0, 1e-12, sum_exp_z)
-
-        return exp_z / sum_exp_z
-
-def relu(z):
-    return np.maximum(0, z)
-
-
-def relu_prime(z):
-    return (z > 0).astype(float)
-    
-
-def cross_entropy(output_a, y):
-    return -np.sum( y * np.log(output_a + 1e-12)) / y.shape[0]
-
-
-def cross_entropy_delta(a, y):
-    return a - y
-
 def get_indices(X_shape, k_size, stride, output_size):
     B, channels, im_height, im_width = X_shape
     k_height, k_width = k_size

@@ -33,6 +33,7 @@ class Network:
                 epoch_loss += batch_loss
             average_loss = epoch_loss / mini_batch_size
             self.losses.append(average_loss)
+            
             print(f"epoch {epoch} done, waiting for evaluate")
             if test_data:
                     print(f"Epoch {epoch}: {self.evaluate(test_data)} / {test_size}")
