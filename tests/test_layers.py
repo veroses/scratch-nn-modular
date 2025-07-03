@@ -3,7 +3,6 @@ import pytest
 
 from scratch_nn import Convolution, Pooling, Linear, Flatten, BatchNormConv, BatchNormFC
 
-
 def almost_equal(a, b, tol=1e-6):
     return np.allclose(a, b, atol=tol)
 
@@ -129,7 +128,12 @@ def test_convolution_identity_1x1_kernel_forward_backward():
     # gradient of kernel k[i,i,0,0] = average over batch of sum of delta[:,i,:,:]
     grad_k = layer.grads["k"]
     B = X.shape[0]
-    expected = np.sum(delta, axis=(0,2,3)) / B
+    d = delta.reshape(B, C, -1)
+    x = X.reshape(B, C, -1)
+    expected = np.array([
+    np.sum(d[:, i, :] * x[:, i, :]) / B
+    for i in range(C)
+])
     for i in range(C):
         assert pytest.approx(grad_k[i,i,0,0], rel=1e-6) == expected[i]
 

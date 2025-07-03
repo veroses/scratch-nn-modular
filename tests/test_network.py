@@ -27,9 +27,9 @@ def test_feedforward_runs_through_all_layers():
 def test_update_calls_loss_and_optimizer(monkeypatch):
     # Stub out cross_entropy and cross_entropy_delta
     def fake_loss(probs, Y):
-        # simple check on shapes
-        assert probs.shape == (1,)
-        assert Y.shape == (1,)
+    # probs should be (batch_size, num_classes),
+    # so here (1,1).  We just check batch-size consistency:
+        assert probs.shape[0] == Y.shape[0] == 1
         return 1.23
     def fake_delta(probs, Y):
         return np.array([0.0])
@@ -81,11 +81,12 @@ def test_evaluate_counts_correct_predictions():
             return X
 
     net = IdNet()
+    # Now Y is one-hot of length 2
     data = [
-        (np.array([0.1, 0.9]), np.array([1])),
-        (np.array([0.8, 0.2]), np.array([0])),
-        (np.array([0.3, 0.7]), np.array([1])),
+        (np.array([0.1, 0.9]), np.array([0, 1])),
+        (np.array([0.8, 0.2]), np.array([1, 0])),
+        (np.array([0.3, 0.7]), np.array([0, 1])),
     ]
     acc = net.evaluate(data, batch_size=2)
-    # All three argmaxes match their labels
+    # argmax([0.1,0.9])=1 matches label 1, etc.
     assert acc == 3
