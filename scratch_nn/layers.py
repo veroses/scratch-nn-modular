@@ -28,6 +28,7 @@ class Layer(ABC):
 
 class Convolution(Layer):
     def __init__(self, in_channels, num_filters, ker_size, padding=(0,0), stride=(1, 1)):
+        super().__init__()
         self.kernel = np.random.randn(num_filters, in_channels, ker_size[0], ker_size[1]) * np.sqrt(2 / ker_size[0])
         self.biases = np.zeros(num_filters)
         self.padding = padding
@@ -70,7 +71,7 @@ class Convolution(Layer):
         dX_col = np.matmul(kernel_matrix.T, delta_out)
 
         im_mat_T = self.im_matrix.transpose(0, 2, 1)      # (B, D, K)
-        dK_col  = np.matmul(delta_out, im_mat_T)         # (B, F, K)
+        dK_col = np.einsum('bfd,bdk->bfk', delta_out, im_mat_T)
 
         self.grads["k"] = np.sum(dK_col, axis=0).reshape(self.kernel.shape) / B
         delta_in = col2im(dX_col, self.X, (ker_height, ker_width), self.stride, self.padding)
@@ -86,6 +87,7 @@ class Convolution(Layer):
 
 class Pooling(Layer):
     def __init__(self, pool_size, type="max", padding=(0,0), stride=None):
+        super().__init__()
         self.pool_size = pool_size
         self.pool_height, self.pool_width = pool_size
         self.type = type
@@ -154,6 +156,7 @@ class Pooling(Layer):
     
 class Linear(Layer):
     def __init__(self, in_dim, out_dim):
+        super().__init__()
         self.biases = np.zeros(out_dim,)
         self.weights = np.random.randn(out_dim, in_dim) * np.sqrt(2 / in_dim)
 
@@ -171,6 +174,8 @@ class Linear(Layer):
 
 
 class Flatten(Layer):
+    def __init__(self):
+        super().__init__()
     def forward(self, X):
         self.dim = X.shape
         batch_size = self.dim[0]

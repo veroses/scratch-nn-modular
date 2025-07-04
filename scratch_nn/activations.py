@@ -4,6 +4,9 @@ import numpy as np
 #TODO: add sigmoid
 
 class Relu(Layer):
+    def __init__(self):
+        super().__init__()
+
     def forward(self, X):
         self.X = X
         return np.maximum(0, X)
@@ -13,6 +16,8 @@ class Relu(Layer):
     
 
 class SoftMax(Layer):
+    def __init__(self):
+        super().__init__()
     def forward(self, logits): #for use in training only
         z_stable = logits - np.max(logits, axis=1, keepdims=True)
         exp_z = np.exp(z_stable)

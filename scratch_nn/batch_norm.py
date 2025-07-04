@@ -5,6 +5,7 @@ import numpy as np
 
 class BatchNormFC(Layer):
     def __init__(self, channels, epsilon=1e-8):
+        super().__init__()
         self.gamma = np.ones(channels)
         self.beta = np.ones(channels)
         self.epsilon = epsilon
@@ -41,6 +42,7 @@ class BatchNormFC(Layer):
     
 class BatchNormConv:
     def __init__(self, channels, epsilon=1e-8):
+        super().__init__()
         self.gamma = np.ones((1, channels, 1, 1))
         self.beta = np.ones((1, channels, 1, 1))
         self.epsilon = epsilon
