@@ -45,7 +45,7 @@ class Network:
         Y = np.stack([y for x, y in mini_batch])
         Y = np.squeeze(Y, axis=-1)
 
-        for layer in self.layers:
+        for  layer in self.layers:
             X = layer.forward(X)
 
         probs = X
@@ -57,8 +57,8 @@ class Network:
         for layer in reversed(self.layers):
             delta = layer.backward(delta)
 
-        for layer in self.layers:
-            self.optimizer.update((layer.params, layer.grads))
+        for idx, layer in enumerate(self.layers):
+            self.optimizer.update(layer.params, layer.grads, idx)
 
         return loss
 
